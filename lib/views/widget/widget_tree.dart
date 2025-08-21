@@ -1,5 +1,6 @@
+import 'package:flutter/foundation.dart'; // For kDebugMode
 import 'package:flutter/material.dart';
-import 'dart:math';
+import 'package:artisanhub/services/api_service.dart';
 
 class WidgetTree extends StatefulWidget {
   const WidgetTree({super.key});
@@ -9,14 +10,44 @@ class WidgetTree extends StatefulWidget {
 }
 
 class _WidgetTreeState extends State<WidgetTree> {
-  // Generate a list of random image URLs from Picsum Photos
-  // We'll generate a fixed number for this example.
-  // Each image will be 200x200 pixels. Add a random seed to get different images on each run.
-  final Random _random = Random();
-  final List<String> _imageUrls = List.generate(
-    21, // Generate 21 image URLs for a 3-column grid
-        (index) => 'https://picsum.photos/seed/${DateTime.now().millisecondsSinceEpoch + index}/200/200',
-  );
+  // State for products
+  List<dynamic> _products = [];
+  bool _isLoadingProducts = true;
+  String? _productError;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchProducts();
+  }
+
+  Future<void> _fetchProducts() async {
+    // Ensure `mounted` is checked before calling setState if the widget might be disposed.
+    // However, for initState, it's generally safe.
+    if (!mounted) return;
+
+    setState(() {
+      _isLoadingProducts = true;
+      _productError = null; // Reset error on new fetch attempt
+    });
+    try {
+      final result = await ApiService.getAllProducts();
+      if (!mounted) return;
+      setState(() {
+        _products = result;
+        _isLoadingProducts = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingProducts = false;
+        _productError = "Failed to load products: $e";
+      });
+      if (kDebugMode) {
+        print("Error loading products: $e");
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,9 +84,8 @@ class _WidgetTreeState extends State<WidgetTree> {
               onTap: () {
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Navigate to Shop')),
+                  SnackBar(content: Text('Displaying fetched products in the main grid.')),
                 );
-                // TODO: Navigator.push(context, MaterialPageRoute(builder: (context) => ShopPage()));
               },
             ),
             ListTile(
@@ -95,48 +125,161 @@ class _WidgetTreeState extends State<WidgetTree> {
           ],
         ),
       ),
-      // --- MODIFIED BODY ---
-      body: GridView.builder(
-        padding: const EdgeInsets.all(4.0), // Add some padding around the grid
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3, // Number of columns
-          crossAxisSpacing: 4.0, // Horizontal space between items
-          mainAxisSpacing: 4.0,   // Vertical space between items
-          childAspectRatio: 1.0,  // Aspect ratio of items (1.0 for square)
+      // --- MODIFIED BODY TO DISPLAY PRODUCTS ---
+      body: _buildProductGrid(),
+    );
+  }
+
+  Widget _buildProductGrid() {
+    if (_isLoadingProducts) {
+      return Center(child: CircularProgressIndicator());
+    }
+
+    if (_productError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline, color: Colors.red, size: 50),
+              SizedBox(height: 10),
+              Text(
+                'Could not load products',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              SizedBox(height: 8),
+              Text(
+                _productError!, // Display the specific error
+                style: TextStyle(fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+              SizedBox(height: 20),
+              ElevatedButton.icon(
+                icon: Icon(Icons.refresh),
+                label: Text('Retry'),
+                onPressed: _fetchProducts, // Retry fetching
+              ),
+            ],
+          ),
         ),
-        itemCount: _imageUrls.length,
-        itemBuilder: (context, index) {
-          return Image.network(
-            _imageUrls[index],
-            fit: BoxFit.cover,
-            // Optional: Add a loading builder
-            loadingBuilder: (BuildContext context, Widget child, ImageChunkEvent? loadingProgress) {
-              if (loadingProgress == null) return child; // Image is loaded
-              return Center(
-                child: CircularProgressIndicator(
-                  value: loadingProgress.expectedTotalBytes != null
-                      ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
-                      : null,
-                ),
-              );
-            },
-            // Optional: Add an error builder
-            errorBuilder: (BuildContext context, Object error, StackTrace? stackTrace) {
-              return Container(
-                color: Colors.grey[300],
-                child: Icon(Icons.broken_image, color: Colors.grey[600], size: 40),
-              );
-            },
-          );
-        },
+      );
+    }
+
+    if (_products.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.storefront_outlined, size: 50, color: Colors.grey[600]),
+              SizedBox(height: 10),
+              Text(
+                'No products found.',
+                style: TextStyle(fontSize: 18, color: Colors.grey[700]),
+                textAlign: TextAlign.center,
+              ),
+              SizedBox(height: 20),
+              ElevatedButton.icon(
+                icon: Icon(Icons.refresh),
+                label: Text('Refresh'),
+                onPressed: _fetchProducts,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Display products in a Grid
+    return GridView.builder(
+      padding: const EdgeInsets.all(8.0),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2, // Display 2 products per row, adjust as needed
+        crossAxisSpacing: 8.0,
+        mainAxisSpacing: 8.0,
+        childAspectRatio: 0.75,
       ),
-      // --- END MODIFIED BODY ---
+      itemCount: _products.length,
+      itemBuilder: (context, index) {
+        final product = _products[index];
+        final String productName = product['name'] ?? 'No Name';
+        final String? imageUrl = product['imageFile'];
+        final String productDescription = product['description'] ?? 'No description available.';
+        final double productPrice = product['price'] ?? 0.0;
+
+        return Card( // Wrap each product item in a Card for better UI
+          clipBehavior: Clip.antiAlias, // Ensures content respects card's rounded corners
+          elevation: 2.0,
+          child: InkWell(
+            onTap: () {
+              // TODO: Navigate to product detail page or show more info
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Tapped on $productName')),
+              );
+            },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch, // Make children stretch horizontally
+              children: <Widget>[
+                Expanded(
+                  flex: 3, // Give more space to the image
+                  child: (imageUrl != null && imageUrl.isNotEmpty)
+                      ? Image.network(
+                    imageUrl,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (BuildContext context, Widget child, ImageChunkEvent? loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return Center(child: CircularProgressIndicator(
+                        value: loadingProgress.expectedTotalBytes != null
+                            ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                            : null,
+                      ));
+                    },
+                    errorBuilder: (BuildContext context, Object error, StackTrace? stackTrace) {
+                      return Container(
+                        color: Colors.grey[200],
+                        child: Center(child: Icon(Icons.broken_image, color: Colors.grey[400], size: 40)),
+                      );
+                    },
+                  )
+                      : Container( // Placeholder if no image URL
+                    color: Colors.grey[200],
+                    child: Center(child: Icon(Icons.image_not_supported, color: Colors.grey[400], size: 40)),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        productName,
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16.0),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      SizedBox(height: 4.0),
+                      Text(
+                        productDescription,
+                        style: TextStyle(fontSize: 12.0, color: Colors.grey[700]),
+                        maxLines: 2, // Limit description lines in the grid view
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      SizedBox(height: 4.0),
+                      Text(
+                        productPrice.toString(),
+                        style: TextStyle(fontSize: 14.0, fontWeight: FontWeight.bold, color: Colors.grey[400]),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
-
-// TODO: Define your actual pages like ShopPage, StoryPage, AboutPage, SettingsPage
-// class ShopPage extends StatelessWidget { /* ... */ }
-// class StoryPage extends StatelessWidget { /* ... */ }
-// class AboutPage extends StatelessWidget { /* ... */ }
-// class SettingsPage extends StatelessWidget { /* ... */ }
