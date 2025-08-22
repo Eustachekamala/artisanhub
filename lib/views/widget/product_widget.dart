@@ -50,6 +50,9 @@ class _ProductWidgetState extends State<ProductWidget>{
               title: Text(product["name"]),
               subtitle: Text(product["description"]),
               trailing: Text("\$${product["price"]}"),
+              onTap: () {
+                // TODO: Navigate to product detail page
+              },
             );
           },
       ),
